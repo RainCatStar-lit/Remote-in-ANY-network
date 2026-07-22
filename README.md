@@ -1,195 +1,97 @@
-# Ubuntu Tailscale Remote Access
+# 智能安装
 
-使用 Tailscale、OpenSSH 和 RustDesk，在不同网络之间连接 Ubuntu 22.04 或 Windows 10/11 工作站。
+同一个小脚本自动识别 **Ubuntu 22.04** 或 **Windows 10/11 x64**，显示识别结果并进行两次确认，然后自动选择对应分支安装：
 
-`main` 分支只保留快速入口和说明。QuickInstaller 检测当前系统，然后从对应测试分支下载所需脚本和安装包，不需要下载整个分支 ZIP。
+- Ubuntu 22.04 → `TEST-IN-22.04`
+- Windows 10/11 x64 → `TEST-IN-WINDOWS`
 
-## 支持的系统
-
-| 当前系统 | 自动选择的分支 | 安装内容 |
-|---|---|---|
-| Ubuntu 22.04 x64 | `TEST-IN-22.04` | OpenSSH、Tailscale、RustDesk、开机启动和连接摘要 |
-| Windows 10/11 x64 | `TEST-IN-WINDOWS` | Win32-OpenSSH、Tailscale、RustDesk、防火墙和连接摘要 |
-
-其他系统会停止，不会继续修改系统。
-
-## Ubuntu 22.04 快速安装
-
-下载小型入口脚本：
-
-```bash
-curl -fsSL \
-  https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/QuickInstaller.sh \
-  -o /tmp/QuickInstaller.sh
-```
-
-校园网需要本机代理时：
-
-```bash
-sudo bash /tmp/QuickInstaller.sh \
-  --proxy http://127.0.0.1:10808
-```
-
-可以直连 GitHub 时：
-
-```bash
-sudo bash /tmp/QuickInstaller.sh
-```
-
-QuickInstaller 只先下载 `TEST-IN-22.04/install.sh`。该安装器再按步骤获取 Linux 模块，不会克隆整个仓库。
-
-常用参数：
+用户只需要下载一个文件：
 
 ```text
---no-rustdesk     不安装 RustDesk
---keep-wayland    保留 Wayland
---keep-sleep      保留休眠设置
---skip-login      暂不登录 Tailscale
+SmartInstaller.cmd
 ```
 
-## Windows 10/11 快速安装
+> Windows 与 Ubuntu 没有共同保证预装的单一脚本解释器，因此该文件采用 Batch/Bash 兼容结构，并在 Windows 部分调用系统自带 PowerShell。用户仍然只下载同一个文件。
 
-从 `main` 分支只下载：
+## Windows
+
+下载 `SmartInstaller.cmd` 后双击运行。
+
+流程：
+
+1. 请求管理员权限。
+2. 识别 Windows 版本和架构。
+3. 显示目标分支 `TEST-IN-WINDOWS`。
+4. 进行两次确认。
+5. 自动检测本机常用代理端口：`10808`、`10809`、`7890`、`7897`。
+6. 下载并校验所需 MSI。
+7. 安装 Tailscale、Win32-OpenSSH 和 RustDesk。
+8. 打开 Tailscale 登录流程；使用与 Ubuntu 相同的账户登录。
+9. 显示 Tailscale IP、SSH 地址和 RustDesk 直接连接地址。
+
+缓存目录：
 
 ```text
-QuickInstaller.cmd
+C:\ProgramData\Ubuntu-tailscale-remote-access\smart-installer\
 ```
 
-双击运行并接受管理员权限提示。脚本会：
-
-1. 检测 64 位 Windows 10/11。
-2. 自动选择 `TEST-IN-WINDOWS`。
-3. 下载分支安装器和 SHA-256 清单。
-4. 仅下载当前缺少的软件包；已缓存且哈希正确的 MSI 不会重复下载。
-5. 安装软件并执行：
-
-```powershell
-& "C:\Program Files\Tailscale\tailscale.exe" login
-```
-
-浏览器打开后，登录与另一台设备相同的 Tailscale 账户。
-
-PowerShell 也可以直接运行：
-
-```powershell
-$Url = "https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/QuickInstaller.ps1"
-$File = "$env:TEMP\RCS-QuickInstaller.ps1"
-Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $File
-PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File $File
-```
-
-使用本机代理：
-
-```powershell
-PowerShell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File $File `
-  -Proxy "http://127.0.0.1:10808"
-```
-
-## 登录后查看 Tailscale IP
-
-Ubuntu：
-
-```bash
-tailscale ip -4 2>/dev/null || sudo /snap/bin/tailscale ip -4
-```
-
-Windows：
-
-```powershell
-& "C:\Program Files\Tailscale\tailscale.exe" ip -4
-```
-
-输出类似：
-
-```text
-100.82.36.17
-```
-
-该地址由 Tailscale 自动分配，不需要手动修改网卡 IP。
-
-## 连接方式
-
-SSH：
-
-```text
-ssh 用户名@100.x.x.x
-```
-
-RustDesk 直接 IP：
-
-```text
-100.x.x.x:21118
-```
-
-RustDesk 安装完成后仍需打开一次：
-
-```text
-设置 → 安全 → 解锁安全设置
-启用直接 IP 访问
-设置永久密码
-```
-
-## 查看端口
-
-Ubuntu：
-
-```bash
-sudo ss -lntup | grep -E ':(22|10808|21118)\b'
-```
-
-Windows 管理员 PowerShell：
-
-```powershell
-Get-NetTCPConnection -State Listen |
-  Where-Object LocalPort -In 22,10808,21118 |
-  Sort-Object LocalPort
-```
-
-端口用途：
-
-```text
-22       OpenSSH
-10808    常见本机 HTTP/Mixed 代理端口
-21118    RustDesk 直接 IP
-```
-
-## 日志
-
-Ubuntu：
-
-```text
-/var/log/ubuntu-tailscale-remote-access/
-```
-
-Windows：
+日志目录：
 
 ```text
 C:\ProgramData\Ubuntu-tailscale-remote-access\logs\
 ```
 
-Windows 下载缓存：
+## Ubuntu 22.04
 
-```text
-C:\ProgramData\Ubuntu-tailscale-remote-access\quick-installer\
+下载同一个 `SmartInstaller.cmd`，在文件所在目录执行：
+
+```bash
+bash SmartInstaller.cmd
 ```
 
-## 分支结构
+流程：
+
+1. 识别 Ubuntu 22.04。
+2. 显示目标分支 `TEST-IN-22.04`。
+3. 进行两次确认。
+4. 自动检测本机常用代理端口。
+5. 下载对应分支的 `install.sh`。
+6. 使用 `sudo` 启动完整安装。
+7. 登录 Tailscale 后显示本机 `100.x.x.x` 地址及相关端口。
+
+缓存目录：
 
 ```text
-main
-  QuickInstaller.sh
-  QuickInstaller.cmd
-  QuickInstaller.ps1
-  README.md
-
-TEST-IN-22.04
-  Ubuntu 22.04 完整安装器和 Linux 模块
-
-TEST-IN-WINDOWS
-  Windows 完整安装器、MSI 和 SHA-256 清单
+~/.cache/ubuntu-tailscale-remote-access/smart-installer/
 ```
+
+## 两次确认
+
+第一次确认系统识别和目标分支是否正确：
+
+```text
+Is the detected system correct and do you want to continue? [y/N]
+```
+
+第二次必须输入：
+
+```text
+INSTALL
+```
+
+任意一次未确认都会立即退出，不执行安装。
+
+## 连接
+
+两台设备必须登录同一个 Tailscale 账户。安装完成后使用脚本显示的 Tailscale IP：
+
+```text
+SSH:       ssh 用户名@100.x.x.x
+RustDesk:  100.x.x.x:21118
+```
+
+RustDesk 被控端仍需手动进入安全设置，启用直接 IP 访问并设置永久密码。
 
 ## 安全说明
 
-防火墙规则只允许 Tailscale 地址段 `100.64.0.0/10` 访问 SSH 和 RustDesk 直接连接端口。不要在路由器上转发 TCP 22 或 TCP 21118，也不要把 RustDesk 永久密码写入脚本或仓库。
+脚本不保存账号密码、Tailscale Auth Key 或 RustDesk 永久密码。Windows 安装包使用 `TEST-IN-WINDOWS` 分支中的 SHA-256 清单校验。
