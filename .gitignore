@@ -1,0 +1,3 @@
+# Keep vendor packages in TEST-IN-WINDOWS.
+# Do not ignore windows/packages/*.msi.
+*.log
