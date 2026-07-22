@@ -1,197 +1,195 @@
-# Ubuntu / Windows Tailscale Remote Access
+# Ubuntu Tailscale Remote Access
 
-用于快速部署以下远程访问链路：
+使用 Tailscale、OpenSSH 和 RustDesk，在不同网络之间连接 Ubuntu 22.04 或 Windows 10/11 工作站。
 
-```text
-Tailscale：提供跨校园网、跨 NAT 的私有 IP
-OpenSSH ：提供终端连接
-RustDesk：通过 Tailscale IP 直接访问图形桌面
-```
+`main` 分支只保留快速入口和说明。QuickInstaller 检测当前系统，然后从对应测试分支下载所需脚本和安装包，不需要下载整个分支 ZIP。
 
-脚本不内置、不生成、不上传任何账号密码或 Tailscale Auth Key。
+## 支持的系统
 
-## 支持范围
+| 当前系统 | 自动选择的分支 | 安装内容 |
+|---|---|---|
+| Ubuntu 22.04 x64 | `TEST-IN-22.04` | OpenSSH、Tailscale、RustDesk、开机启动和连接摘要 |
+| Windows 10/11 x64 | `TEST-IN-WINDOWS` | Win32-OpenSSH、Tailscale、RustDesk、防火墙和连接摘要 |
 
-- Ubuntu 20.04 及以上版本，重点适配 Ubuntu 22.04
-- Debian 系发行版，需要 `apt` 和 `systemd`
-- Windows 10 1809 及以上版本、Windows 11
-- Windows 运行 `install.sh` 需要 **Git Bash**，不要在 WSL 中运行
+其他系统会停止，不会继续修改系统。
 
-## Linux 一键部署
+## Ubuntu 22.04 快速安装
+
+下载小型入口脚本：
 
 ```bash
 curl -fsSL \
-  https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/install.sh \
-  -o /tmp/remote-access-install.sh && \
-sudo bash /tmp/remote-access-install.sh
+  https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/QuickInstaller.sh \
+  -o /tmp/QuickInstaller.sh
 ```
 
-脚本会暂停并显示 Tailscale 登录链接。使用浏览器登录后，脚本继续完成检查并显示 Tailscale IP。
-
-## Windows 一键部署
-
-以普通方式打开 **Git Bash**，执行：
+校园网需要本机代理时：
 
 ```bash
-curl -fsSL \
-  https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/install.sh \
-  -o install.sh && \
-bash install.sh
+sudo bash /tmp/QuickInstaller.sh \
+  --proxy http://127.0.0.1:10808
 ```
 
-脚本会自动请求管理员权限。Windows 不原生执行 `.sh`，所以这里使用 Git Bash；不要在 WSL 中运行。
+可以直连 GitHub 时：
 
-## 脚本执行内容
+```bash
+sudo bash /tmp/QuickInstaller.sh
+```
 
-脚本会自动：
+QuickInstaller 只先下载 `TEST-IN-22.04/install.sh`。该安装器再按步骤获取 Linux 模块，不会克隆整个仓库。
 
-1. 检测 Windows 或 Linux 及系统版本。
-2. 安装并启用 OpenSSH Server。
-3. 安装并启用 Tailscale。
-4. 安装 RustDesk，并尽可能启用系统服务。
-5. 设置相关服务开机自启。
-6. 关闭工作站接通电源时的自动睡眠。
-7. 将 SSH 和 RustDesk 直连端口限制为 Tailnet 访问。
-8. Linux 使用 GDM 时切换到 X11，以支持登录界面的远程访问。
-9. 引导用户登录 Tailscale，并显示最终连接地址。
-10. 保存本次安装的完整终端输出日志。
-
-## 安装日志
-
-每次运行都会创建独立日志文件，便于故障排查和分发反馈。脚本只记录终端输出，不主动记录密码、Tailscale Auth Key 或 RustDesk 永久密码。
-
-Linux：
+常用参数：
 
 ```text
-/var/log/Ubuntu-tailscale-remote-access/install-YYYYMMDD-HHMMSS.log
+--no-rustdesk     不安装 RustDesk
+--keep-wayland    保留 Wayland
+--keep-sleep      保留休眠设置
+--skip-login      暂不登录 Tailscale
 ```
 
-查看最新日志：
+## Windows 10/11 快速安装
+
+从 `main` 分支只下载：
+
+```text
+QuickInstaller.cmd
+```
+
+双击运行并接受管理员权限提示。脚本会：
+
+1. 检测 64 位 Windows 10/11。
+2. 自动选择 `TEST-IN-WINDOWS`。
+3. 下载分支安装器和 SHA-256 清单。
+4. 仅下载当前缺少的软件包；已缓存且哈希正确的 MSI 不会重复下载。
+5. 安装软件并执行：
+
+```powershell
+& "C:\Program Files\Tailscale\tailscale.exe" login
+```
+
+浏览器打开后，登录与另一台设备相同的 Tailscale 账户。
+
+PowerShell 也可以直接运行：
+
+```powershell
+$Url = "https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/QuickInstaller.ps1"
+$File = "$env:TEMP\RCS-QuickInstaller.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $File
+PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File $File
+```
+
+使用本机代理：
+
+```powershell
+PowerShell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File $File `
+  -Proxy "http://127.0.0.1:10808"
+```
+
+## 登录后查看 Tailscale IP
+
+Ubuntu：
 
 ```bash
-ls -1t /var/log/Ubuntu-tailscale-remote-access/install-*.log | head -n 1
-sudo less "$(ls -1t /var/log/Ubuntu-tailscale-remote-access/install-*.log | head -n 1)"
+tailscale ip -4 2>/dev/null || sudo /snap/bin/tailscale ip -4
 ```
 
 Windows：
 
-```text
-C:\ProgramData\Ubuntu-tailscale-remote-access\logs\install-YYYYMMDD-HHMMSS.log
-```
-
-安装结束时，脚本会再次显示本次日志的完整路径。日志可能包含系统版本、主机名和 Tailscale IP，公开提交前应先检查。
-
-## Tailscale 登录
-
-运行脚本后，终端会出现登录链接。打开链接，使用两台设备共同加入的同一 Tailscale 账户或 Tailnet 登录。
-
-<!-- 将图片保存为 docs/images/tailscale-login.png -->
-![Tailscale 登录示意图](docs/images/tailscale-login.png)
-
-登录完成后查看本机地址：
-
-```bash
-tailscale ip -4
+```powershell
+& "C:\Program Files\Tailscale\tailscale.exe" ip -4
 ```
 
 输出类似：
 
 ```text
-100.88.12.34
+100.82.36.17
 ```
 
-## RustDesk 必须手动完成的一项设置
+该地址由 Tailscale 自动分配，不需要手动修改网卡 IP。
 
-脚本不会配置任何密码。打开 RustDesk，进入：
+## 连接方式
+
+SSH：
 
 ```text
-设置 -> 安全 -> 启用直接 IP 访问
+ssh 用户名@100.x.x.x
 ```
 
-如需无人值守访问，再由设备所有者手动设置永久密码。
-
-<!-- 将图片保存为 docs/images/rustdesk-direct-ip.png -->
-![RustDesk 直接 IP 访问设置](docs/images/rustdesk-direct-ip.png)
-
-RustDesk 直接访问端口默认为：
+RustDesk 直接 IP：
 
 ```text
-21118
+100.x.x.x:21118
 ```
 
-## 使用 Tailscale IP 连接
-
-所有远程功能均使用 Tailscale 分配的 `100.x.x.x` 地址，**不要使用校园网 IP**。
-
-### SSH
-
-```bash
-ssh 用户名@100.88.12.34
-```
-
-例如：
-
-```bash
-ssh rcs@100.88.12.34
-```
-
-### RustDesk
-
-在 RustDesk 连接框输入：
+RustDesk 安装完成后仍需打开一次：
 
 ```text
-100.88.12.34:21118
+设置 → 安全 → 解锁安全设置
+启用直接 IP 访问
+设置永久密码
 ```
 
-这种方式不依赖 RustDesk 公共 ID 路由完成寻址，适合存在客户端隔离、NAT 或远程控制平台限制的校园网。
+## 查看端口
 
-## Linux 完成后重启
-
-脚本修改了 GDM 的显示服务器设置时，需要重启：
+Ubuntu：
 
 ```bash
-sudo reboot
+sudo ss -lntup | grep -E ':(22|10808|21118)\b'
 ```
 
-## 快速检查
-
-Linux：
-
-```bash
-systemctl is-enabled ssh tailscaled
-systemctl is-active ssh tailscaled
-tailscale status
-tailscale ip -4
-```
-
-Windows PowerShell：
+Windows 管理员 PowerShell：
 
 ```powershell
-Get-Service sshd, Tailscale, RustDesk
-tailscale status
-tailscale ip -4
+Get-NetTCPConnection -State Listen |
+  Where-Object LocalPort -In 22,10808,21118 |
+  Sort-Object LocalPort
 ```
 
-从另一台设备测试：
+端口用途：
 
-```bash
-tailscale ping 100.88.12.34
-ssh 用户名@100.88.12.34
+```text
+22       OpenSSH
+10808    常见本机 HTTP/Mixed 代理端口
+21118    RustDesk 直接 IP
+```
+
+## 日志
+
+Ubuntu：
+
+```text
+/var/log/ubuntu-tailscale-remote-access/
+```
+
+Windows：
+
+```text
+C:\ProgramData\Ubuntu-tailscale-remote-access\logs\
+```
+
+Windows 下载缓存：
+
+```text
+C:\ProgramData\Ubuntu-tailscale-remote-access\quick-installer\
+```
+
+## 分支结构
+
+```text
+main
+  QuickInstaller.sh
+  QuickInstaller.cmd
+  QuickInstaller.ps1
+  README.md
+
+TEST-IN-22.04
+  Ubuntu 22.04 完整安装器和 Linux 模块
+
+TEST-IN-WINDOWS
+  Windows 完整安装器、MSI 和 SHA-256 清单
 ```
 
 ## 安全说明
 
-- 仓库和脚本中不应提交密码、Auth Key、订阅链接或私钥。
-- Tailscale 登录由用户在官方登录页面完成。
-- SSH 使用系统现有账户认证；建议后续配置 SSH 公钥。
-- RustDesk 永久密码由用户本人在客户端中设置。
-- Windows 防火墙规则只允许 Tailscale 地址段访问 TCP 22 和 TCP 21118。
-- Linux 已启用 UFW 时，脚本只允许 `tailscale0` 访问这两个端口。
-
-## 官方参考
-
-- [Tailscale Linux 安装](https://tailscale.com/kb/1031/install-linux)
-- [Tailscale Windows 安装](https://tailscale.com/kb/1022/install-windows)
-- [Microsoft OpenSSH Server for Windows](https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse)
-- [RustDesk Linux 客户端](https://rustdesk.com/docs/zh-cn/client/linux/)
-- [RustDesk 客户端配置](https://rustdesk.com/docs/zh-cn/self-host/client-configuration/advanced-settings/)
+防火墙规则只允许 Tailscale 地址段 `100.64.0.0/10` 访问 SSH 和 RustDesk 直接连接端口。不要在路由器上转发 TCP 22 或 TCP 21118，也不要把 RustDesk 永久密码写入脚本或仓库。
