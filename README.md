@@ -1,275 +1,197 @@
-# Ubuntu 22.04 远程工作站快速部署
+# Ubuntu / Windows Tailscale Remote Access
 
-使用 **Tailscale + SSH + RustDesk** 连接 Ubuntu 工作站。
-
-适用于校园网设备隔离、不同网段、没有公网 IP、不能做端口映射等场景。
-
-## 连接方式
+用于快速部署以下远程访问链路：
 
 ```text
-Windows 笔记本
-├── SSH ────────────────┐
-└── RustDesk 直接 IP ───┤
-                         │ Tailscale
-                         ▼
-Ubuntu 22.04 工作站
+Tailscale：提供跨校园网、跨 NAT 的私有 IP
+OpenSSH ：提供终端连接
+RustDesk：通过 Tailscale IP 直接访问图形桌面
 ```
 
-两台设备登录同一个 Tailscale 账户后，Ubuntu 会获得一个固定的 `100.x.x.x` 地址。
+脚本不内置、不生成、不上传任何账号密码或 Tailscale Auth Key。
 
-后续统一使用这个地址：
+## 支持范围
 
-```text
-SSH：      ssh 用户名@100.x.x.x
-RustDesk： 100.x.x.x:21118
-```
+- Ubuntu 20.04 及以上版本，重点适配 Ubuntu 22.04
+- Debian 系发行版，需要 `apt` 和 `systemd`
+- Windows 10 1809 及以上版本、Windows 11
+- Windows 运行 `install.sh` 需要 **Git Bash**，不要在 WSL 中运行
 
-不需要公网 IP、路由器端口转发或 RustDesk 公共 ID。
-
----
-
-## 一、Ubuntu 工作站
-
-### 1. 安装 SSH
+## Linux 一键部署
 
 ```bash
-sudo apt update
-sudo apt install -y openssh-server
-sudo systemctl enable --now ssh
-systemctl is-active ssh
+curl -fsSL \
+  https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/install.sh \
+  -o /tmp/remote-access-install.sh && \
+sudo bash /tmp/remote-access-install.sh
 ```
 
-正常应输出：
+脚本会暂停并显示 Tailscale 登录链接。使用浏览器登录后，脚本继续完成检查并显示 Tailscale IP。
 
-```text
-active
-```
+## Windows 一键部署
 
-### 2. 安装 Tailscale
+以普通方式打开 **Git Bash**，执行：
 
 ```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo systemctl enable --now tailscaled
-sudo tailscale up
+curl -fsSL \
+  https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/install.sh \
+  -o install.sh && \
+bash install.sh
 ```
 
-浏览器完成登录后查看工作站地址：
+脚本会自动请求管理员权限。Windows 不原生执行 `.sh`，所以这里使用 Git Bash；不要在 WSL 中运行。
+
+## 脚本执行内容
+
+脚本会自动：
+
+1. 检测 Windows 或 Linux 及系统版本。
+2. 安装并启用 OpenSSH Server。
+3. 安装并启用 Tailscale。
+4. 安装 RustDesk，并尽可能启用系统服务。
+5. 设置相关服务开机自启。
+6. 关闭工作站接通电源时的自动睡眠。
+7. 将 SSH 和 RustDesk 直连端口限制为 Tailnet 访问。
+8. Linux 使用 GDM 时切换到 X11，以支持登录界面的远程访问。
+9. 引导用户登录 Tailscale，并显示最终连接地址。
+10. 保存本次安装的完整终端输出日志。
+
+## 安装日志
+
+每次运行都会创建独立日志文件，便于故障排查和分发反馈。脚本只记录终端输出，不主动记录密码、Tailscale Auth Key 或 RustDesk 永久密码。
+
+Linux：
+
+```text
+/var/log/Ubuntu-tailscale-remote-access/install-YYYYMMDD-HHMMSS.log
+```
+
+查看最新日志：
+
+```bash
+ls -1t /var/log/Ubuntu-tailscale-remote-access/install-*.log | head -n 1
+sudo less "$(ls -1t /var/log/Ubuntu-tailscale-remote-access/install-*.log | head -n 1)"
+```
+
+Windows：
+
+```text
+C:\ProgramData\Ubuntu-tailscale-remote-access\logs\install-YYYYMMDD-HHMMSS.log
+```
+
+安装结束时，脚本会再次显示本次日志的完整路径。日志可能包含系统版本、主机名和 Tailscale IP，公开提交前应先检查。
+
+## Tailscale 登录
+
+运行脚本后，终端会出现登录链接。打开链接，使用两台设备共同加入的同一 Tailscale 账户或 Tailnet 登录。
+
+<!-- 将图片保存为 docs/images/tailscale-login.png -->
+![Tailscale 登录示意图](docs/images/tailscale-login.png)
+
+登录完成后查看本机地址：
 
 ```bash
 tailscale ip -4
 ```
 
-记录输出，例如：
+输出类似：
 
 ```text
-100.80.20.15
+100.88.12.34
 ```
 
-无法在线安装时，可在其他设备下载 Tailscale 的 Ubuntu `.deb`，复制到工作站后执行：
+## RustDesk 必须手动完成的一项设置
 
-```bash
-sudo apt install ./tailscale_*.deb
-sudo systemctl enable --now tailscaled
-sudo tailscale up
-```
-
-### 3. 安装 RustDesk
-
-将 RustDesk Ubuntu `.deb` 放到下载目录，然后执行：
-
-```bash
-cd ~/Downloads
-sudo apt install ./rustdesk*.deb
-```
-
-如果存在 RustDesk 服务，启用开机启动：
-
-```bash
-sudo systemctl enable --now rustdesk.service 2>/dev/null || true
-```
-
-打开 RustDesk：
-
-```bash
-rustdesk
-```
-
-在 RustDesk 设置中完成：
-
-1. 设置永久访问密码。
-2. 开启无人值守访问。
-3. 开启直接 IP 访问。
-4. 保持直接访问端口为 `21118`。
-
-### 4. 禁止工作站自动休眠
-
-```bash
-sudo systemctl mask \
-  sleep.target \
-  suspend.target \
-  hibernate.target \
-  hybrid-sleep.target
-```
-
-屏幕可以关闭，但主机不能进入挂起状态。
-
-### 5. 防火墙设置
-
-只有 UFW 已启用时才需要执行：
-
-```bash
-sudo ufw status
-sudo ufw allow in on tailscale0 to any port 22 proto tcp
-sudo ufw allow in on tailscale0 to any port 21118 proto tcp
-```
-
-不需要在路由器中开放任何端口。
-
----
-
-## 二、Windows 笔记本
-
-安装：
-
-- Tailscale
-- RustDesk
-
-Tailscale 登录与 Ubuntu 相同的账户。
-
-### 1. 测试 Tailscale
-
-PowerShell 执行：
-
-```powershell
-tailscale ping 100.80.20.15
-```
-
-将地址替换成 Ubuntu 的 Tailscale IP。
-
-### 2. SSH 连接
-
-```powershell
-ssh rcs@100.80.20.15
-```
-
-替换：
-
-- `rcs`：Ubuntu 用户名
-- `100.80.20.15`：Ubuntu 的 Tailscale IP
-
-首次连接输入：
+脚本不会配置任何密码。打开 RustDesk，进入：
 
 ```text
-yes
+设置 -> 安全 -> 启用直接 IP 访问
 ```
 
-然后输入 Ubuntu 登录密码。
+如需无人值守访问，再由设备所有者手动设置永久密码。
 
-### 3. RustDesk 连接
+<!-- 将图片保存为 docs/images/rustdesk-direct-ip.png -->
+![RustDesk 直接 IP 访问设置](docs/images/rustdesk-direct-ip.png)
 
-在 Windows RustDesk 中输入：
+RustDesk 直接访问端口默认为：
 
 ```text
-100.80.20.15:21118
+21118
 ```
 
-然后输入 Ubuntu RustDesk 设置的永久密码。
+## 使用 Tailscale IP 连接
 
-这里使用的是 Tailscale IP 直连，不依赖 RustDesk 公共 ID 或公共中继。
+所有远程功能均使用 Tailscale 分配的 `100.x.x.x` 地址，**不要使用校园网 IP**。
 
----
-
-## 三、快速验收
-
-Ubuntu 执行：
+### SSH
 
 ```bash
-systemctl is-active ssh
-systemctl is-active tailscaled
+ssh 用户名@100.88.12.34
+```
+
+例如：
+
+```bash
+ssh rcs@100.88.12.34
+```
+
+### RustDesk
+
+在 RustDesk 连接框输入：
+
+```text
+100.88.12.34:21118
+```
+
+这种方式不依赖 RustDesk 公共 ID 路由完成寻址，适合存在客户端隔离、NAT 或远程控制平台限制的校园网。
+
+## Linux 完成后重启
+
+脚本修改了 GDM 的显示服务器设置时，需要重启：
+
+```bash
+sudo reboot
+```
+
+## 快速检查
+
+Linux：
+
+```bash
+systemctl is-enabled ssh tailscaled
+systemctl is-active ssh tailscaled
 tailscale status
 tailscale ip -4
-sudo ss -lntp | grep -E '(:22|:21118)'
 ```
 
-Windows 执行：
+Windows PowerShell：
 
 ```powershell
-tailscale ping 100.80.20.15
-ssh rcs@100.80.20.15
+Get-Service sshd, Tailscale, RustDesk
+tailscale status
+tailscale ip -4
 ```
 
-随后使用 RustDesk 连接：
-
-```text
-100.80.20.15:21118
-```
-
-以下三项都成功，即部署完成：
-
-```text
-1. Tailscale 可以 ping 通工作站
-2. SSH 可以登录 Ubuntu
-3. RustDesk 可以打开 Ubuntu 桌面
-```
-
----
-
-## 四、常见问题
-
-### Tailscale 能 ping，SSH 不能连接
-
-Ubuntu 检查：
+从另一台设备测试：
 
 ```bash
-systemctl status ssh --no-pager
-sudo ss -lntp | grep ':22'
-sudo ufw status
+tailscale ping 100.88.12.34
+ssh 用户名@100.88.12.34
 ```
 
-### RustDesk 公共 ID 无法连接
+## 安全说明
 
-不要使用公共 ID，直接填写：
+- 仓库和脚本中不应提交密码、Auth Key、订阅链接或私钥。
+- Tailscale 登录由用户在官方登录页面完成。
+- SSH 使用系统现有账户认证；建议后续配置 SSH 公钥。
+- RustDesk 永久密码由用户本人在客户端中设置。
+- Windows 防火墙规则只允许 Tailscale 地址段访问 TCP 22 和 TCP 21118。
+- Linux 已启用 UFW 时，脚本只允许 `tailscale0` 访问这两个端口。
 
-```text
-Ubuntu的Tailscale-IP:21118
-```
+## 官方参考
 
-### RustDesk 黑屏
-
-先注销 Ubuntu，在登录界面点击齿轮并选择：
-
-```text
-Ubuntu on Xorg
-```
-
-登录后检查：
-
-```bash
-echo "$XDG_SESSION_TYPE"
-```
-
-正常应输出：
-
-```text
-x11
-```
-
-### 重启后无法连接
-
-Ubuntu 检查服务是否开机启动：
-
-```bash
-systemctl is-enabled ssh
-systemctl is-enabled tailscaled
-systemctl is-enabled rustdesk.service 2>/dev/null || true
-```
-
----
-
-## 最小软件清单
-
-| 设备 | 必需软件 |
-|---|---|
-| Ubuntu 工作站 | OpenSSH Server、Tailscale、RustDesk |
-| Windows 笔记本 | Tailscale、RustDesk |
-
+- [Tailscale Linux 安装](https://tailscale.com/kb/1031/install-linux)
+- [Tailscale Windows 安装](https://tailscale.com/kb/1022/install-windows)
+- [Microsoft OpenSSH Server for Windows](https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse)
+- [RustDesk Linux 客户端](https://rustdesk.com/docs/zh-cn/client/linux/)
+- [RustDesk 客户端配置](https://rustdesk.com/docs/zh-cn/self-host/client-configuration/advanced-settings/)
