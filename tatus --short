@@ -1,0 +1,18 @@
+ .gitattributes                            |   3 [32m+[m
+ README (1).md                             |  97 [31m-----------[m
+ docs/images/README.md                     |   4 [32m+[m
+ install (1).sh                            | 229 [31m-------------------------[m
+ install.sh                                |   0
+ reset-ubuntu.sh                           |   0
+ scripts/linux/01-base.sh                  |  31 [32m++++[m
+ scripts/linux/02-ssh.sh                   |   8 [32m+[m
+ scripts/linux/03-tailscale.sh             | 116 [32m+++++++++++++[m
+ scripts/linux/04-rustdesk.sh              |  88 [32m++++++++++[m
+ scripts/linux/05-system.sh                |  33 [32m++++[m
+ scripts/linux/06-login-summary.sh         |  96 [32m+++++++++++[m
+ scripts/linux/07-verify.sh                |  34 [32m++++[m
+ scripts/linux/common.sh                   | 271 [32m++++++++++++++++++++++++++++++[m
+ scripts/windows/install.ps1               | 226 [32m+++++++++++++++++++++++++[m
+ tests/check.sh                            |  18 [32m++[m
+ ubuntu-tailscale-remote-access-v0.5.0.zip | Bin [31m20714[m -> [32m0[m bytes
+ 17 files changed, 928 insertions(+), 326 deletions(-)
