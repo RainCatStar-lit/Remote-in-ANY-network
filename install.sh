@@ -1,51 +1,43 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Ubuntu 22.04 remote workstation installer
-# Installs: OpenSSH Server, Tailscale, RustDesk
-# Configures: service autostart, no suspend, Xorg, minimal UFW rules
+VERSION="0.5.0"
+REPO_RAW_BASE_DEFAULT="https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main"
+REPO_RAW_BASE="${REPO_RAW_BASE:-${REPO_RAW_BASE_DEFAULT}}"
 
+INSTALL_PROXY="${INSTALL_PROXY:-}"
+RUSTDESK_DEB="${RUSTDESK_DEB:-}"
 NO_RUSTDESK=0
 KEEP_WAYLAND=0
 KEEP_SLEEP=0
-FORCE_OS=0
-RUSTDESK_DEB="${RUSTDESK_DEB:-}"
+SKIP_TAILSCALE_LOGIN=0
 
 usage() {
   cat <<'USAGE'
-Usage: sudo bash install.sh [options]
+Usage:
+  Ubuntu: sudo bash install.sh [options]
+  Windows: bash install.sh [options]   # Git Bash, not WSL
 
 Options:
-  --rustdesk-deb PATH  Install RustDesk from a local .deb file
+  --proxy URL          HTTP/Mixed proxy, for example http://127.0.0.1:10808
+  --rustdesk-deb PATH  Use a local RustDesk .deb on Ubuntu
   --no-rustdesk        Skip RustDesk installation
-  --keep-wayland       Do not switch GDM to Xorg
-  --keep-sleep         Do not disable suspend/hibernate
-  --force-os           Run even if the system is not Ubuntu 22.04
+  --keep-wayland       Keep Wayland on Ubuntu
+  --keep-sleep         Keep the current sleep/hibernate settings
+  --skip-login         Install Tailscale without opening the login step
   -h, --help           Show this help
-
-Optional environment variable:
-  TS_AUTHKEY           Tailscale auth key for unattended login
-                       Do not commit auth keys to Git.
 USAGE
-}
-
-log() {
-  printf '\n[remote-setup] %s\n' "$*"
-}
-
-warn() {
-  printf '\n[remote-setup] WARNING: %s\n' "$*" >&2
-}
-
-fail() {
-  printf '\n[remote-setup] ERROR: %s\n' "$*" >&2
-  exit 1
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --proxy)
+      [[ $# -ge 2 ]] || { echo "--proxy requires a URL" >&2; exit 2; }
+      INSTALL_PROXY="$2"
+      shift 2
+      ;;
     --rustdesk-deb)
-      [[ $# -ge 2 ]] || fail "--rustdesk-deb requires a file path"
+      [[ $# -ge 2 ]] || { echo "--rustdesk-deb requires a path" >&2; exit 2; }
       RUSTDESK_DEB="$2"
       shift 2
       ;;
@@ -61,8 +53,8 @@ while [[ $# -gt 0 ]]; do
       KEEP_SLEEP=1
       shift
       ;;
-    --force-os)
-      FORCE_OS=1
+    --skip-login)
+      SKIP_TAILSCALE_LOGIN=1
       shift
       ;;
     -h|--help)
@@ -70,160 +62,173 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      fail "Unknown option: $1"
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
       ;;
   esac
 done
 
-[[ ${EUID} -eq 0 ]] || fail "Run with sudo: sudo bash install.sh"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+LOCAL_SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
+TEMP_ROOT=""
+LOG_FILE=""
+APT_PROXY_FILE="/etc/apt/apt.conf.d/99ubuntu-tailscale-remote-access-proxy"
+INSTALL_FINISHED=0
 
-if [[ -r /etc/os-release ]]; then
-  # shellcheck disable=SC1091
-  source /etc/os-release
-else
-  fail "/etc/os-release not found"
-fi
+cleanup() {
+  local rc=$?
+  if [[ -n "${TEMP_ROOT}" && -d "${TEMP_ROOT}" ]]; then
+    rm -rf "${TEMP_ROOT}"
+  fi
+  if [[ -f "${APT_PROXY_FILE}" ]]; then
+    rm -f "${APT_PROXY_FILE}"
+  fi
+  if [[ -n "${LOG_FILE}" ]]; then
+    if [[ ${rc} -eq 0 && ${INSTALL_FINISHED} -eq 1 ]]; then
+      printf '\n[installer] Result: SUCCESS\n' || true
+    else
+      printf '\n[installer] Result: FAILED\n' || true
+    fi
+    printf '[installer] Exit code: %s\n' "${rc}" || true
+    printf '[installer] End: %s\n' "$(date --iso-8601=seconds 2>/dev/null || date)" || true
+    printf '[installer] Log: %s\n' "${LOG_FILE}" || true
+  fi
+  trap - EXIT
+  exit "${rc}"
+}
+trap cleanup EXIT
 
-if [[ ${FORCE_OS} -ne 1 ]]; then
-  [[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == "22.04" ]] || \
-    fail "This script targets Ubuntu 22.04. Use --force-os to override."
-fi
+bootstrap_curl() {
+  local url="$1"
+  local dest="$2"
+  local candidate
+  local -a args=(--fail --silent --show-error --location --retry 3 --connect-timeout 10)
 
-export DEBIAN_FRONTEND=noninteractive
+  if [[ -n "${INSTALL_PROXY}" ]]; then
+    curl "${args[@]}" --proxy "${INSTALL_PROXY}" "${url}" -o "${dest}"
+    return
+  fi
 
-log "Installing minimal base packages"
-apt-get update
-apt-get install -y --no-install-recommends \
-  ca-certificates \
-  curl \
-  openssh-server \
-  python3
+  if curl "${args[@]}" "${url}" -o "${dest}"; then
+    return
+  fi
 
-log "Enabling SSH"
-systemctl enable --now ssh
+  for candidate in 10808 10809 7890 7897; do
+    if curl "${args[@]}" --max-time 8 --proxy "http://127.0.0.1:${candidate}" \
+      "${url}" -o "${dest}"; then
+      INSTALL_PROXY="http://127.0.0.1:${candidate}"
+      echo "[installer] Detected local proxy: ${INSTALL_PROXY}" >&2
+      return
+    fi
+  done
 
-log "Installing Tailscale"
-if ! command -v tailscale >/dev/null 2>&1; then
-  curl -fsSL --retry 3 https://tailscale.com/install.sh | sh
-fi
-systemctl enable --now tailscaled
-
-if [[ -n "${TS_AUTHKEY:-}" ]]; then
-  log "Joining Tailscale with TS_AUTHKEY"
-  tailscale up --auth-key="${TS_AUTHKEY}"
-elif ! tailscale ip -4 >/dev/null 2>&1; then
-  log "Tailscale login is required"
-  warn "Complete the browser login shown by the next command."
-  tailscale up || true
-fi
-
-install_rustdesk_latest() {
-  local dpkg_arch rustdesk_arch api_json asset_url temp_deb
-
-  dpkg_arch="$(dpkg --print-architecture)"
-  case "${dpkg_arch}" in
-    amd64) rustdesk_arch="x86_64" ;;
-    arm64) rustdesk_arch="aarch64" ;;
-    armhf) rustdesk_arch="armv7" ;;
-    *) fail "Unsupported RustDesk architecture: ${dpkg_arch}" ;;
-  esac
-
-  log "Finding the latest official RustDesk .deb for ${rustdesk_arch}"
-  api_json="$(curl -fsSL --retry 3 \
-    https://api.github.com/repos/rustdesk/rustdesk/releases/latest)"
-
-  asset_url="$(python3 -c '
-import json
-import sys
-arch = sys.argv[1]
-data = json.load(sys.stdin)
-suffix = f"-{arch}.deb"
-urls = [a["browser_download_url"] for a in data.get("assets", [])
-        if a.get("name", "").endswith(suffix)]
-print(urls[0] if urls else "")
-' "${rustdesk_arch}" <<<"${api_json}")"
-
-  [[ -n "${asset_url}" ]] || fail "No matching RustDesk .deb was found"
-
-  temp_deb="$(mktemp --suffix=.deb)"
-  curl -fL --retry 3 --output "${temp_deb}" "${asset_url}"
-  apt-get install -y "${temp_deb}"
-  rm -f "${temp_deb}"
+  echo "Failed to download: ${url}" >&2
+  echo "Use --proxy http://127.0.0.1:PORT or run from a complete repository copy." >&2
+  return 1
 }
 
-if [[ ${NO_RUSTDESK} -ne 1 ]]; then
-  if [[ -n "${RUSTDESK_DEB}" ]]; then
-    [[ -f "${RUSTDESK_DEB}" ]] || fail "RustDesk package not found: ${RUSTDESK_DEB}"
-    log "Installing RustDesk from ${RUSTDESK_DEB}"
-    apt-get install -y "${RUSTDESK_DEB}"
-  elif dpkg-query -W -f='${Status}' rustdesk 2>/dev/null | grep -q 'install ok installed'; then
-    log "RustDesk is already installed"
+get_module() {
+  local relative="$1"
+  local local_path="${LOCAL_SCRIPTS_DIR}/${relative}"
+  local target="${TEMP_ROOT}/scripts/${relative}"
+
+  mkdir -p "$(dirname -- "${target}")"
+  if [[ -f "${local_path}" ]]; then
+    cp "${local_path}" "${target}"
   else
-    install_rustdesk_latest
+    bootstrap_curl "${REPO_RAW_BASE}/scripts/${relative}" "${target}"
   fi
+  chmod +x "${target}" 2>/dev/null || true
+  printf '%s\n' "${target}"
+}
 
-  if systemctl list-unit-files rustdesk.service 2>/dev/null | grep -q '^rustdesk.service'; then
-    systemctl enable --now rustdesk.service || true
-  fi
-fi
+UNAME_S="$(uname -s 2>/dev/null || true)"
+case "${UNAME_S}" in
+  MINGW*|MSYS*|CYGWIN*)
+    TEMP_ROOT="$(mktemp -d)"
+    WINDOWS_SCRIPT="$(get_module windows/install.ps1)"
+    PS_ARGS=(
+      -NoProfile
+      -ExecutionPolicy Bypass
+      -File "$(cygpath -w "${WINDOWS_SCRIPT}")"
+    )
+    [[ -n "${INSTALL_PROXY}" ]] && PS_ARGS+=( -Proxy "${INSTALL_PROXY}" )
+    [[ ${NO_RUSTDESK} -eq 1 ]] && PS_ARGS+=( -NoRustDesk )
+    [[ ${KEEP_SLEEP} -eq 1 ]] && PS_ARGS+=( -KeepSleep )
+    [[ ${SKIP_TAILSCALE_LOGIN} -eq 1 ]] && PS_ARGS+=( -SkipTailscaleLogin )
+    powershell.exe "${PS_ARGS[@]}"
+    exit $?
+    ;;
+  Linux)
+    ;;
+  *)
+    echo "Unsupported operating system: ${UNAME_S}" >&2
+    exit 1
+    ;;
+esac
 
-if [[ ${KEEP_SLEEP} -ne 1 ]]; then
-  log "Disabling suspend and hibernate"
-  systemctl mask \
-    sleep.target \
-    suspend.target \
-    hibernate.target \
-    hybrid-sleep.target
-fi
+[[ ${EUID} -eq 0 ]] || { echo "Run with sudo: sudo bash install.sh" >&2; exit 1; }
 
-XORG_CHANGED=0
-if [[ ${KEEP_WAYLAND} -ne 1 && -f /etc/gdm3/custom.conf ]]; then
-  log "Configuring GDM to use Xorg for reliable unattended desktop access"
-  cp -a /etc/gdm3/custom.conf /etc/gdm3/custom.conf.remote-setup.bak
+mkdir -p /var/log/ubuntu-tailscale-remote-access
+LOG_FILE="/var/log/ubuntu-tailscale-remote-access/install-$(date +%Y%m%d-%H%M%S).log"
+touch "${LOG_FILE}"
+chmod 600 "${LOG_FILE}"
+exec > >(tee -a "${LOG_FILE}") 2>&1
 
-  if grep -Eq '^[#[:space:]]*WaylandEnable=' /etc/gdm3/custom.conf; then
-    sed -i 's/^[#[:space:]]*WaylandEnable=.*/WaylandEnable=false/' \
-      /etc/gdm3/custom.conf
-  elif grep -q '^\[daemon\]' /etc/gdm3/custom.conf; then
-    sed -i '/^\[daemon\]/a WaylandEnable=false' /etc/gdm3/custom.conf
-  else
-    printf '\n[daemon]\nWaylandEnable=false\n' >> /etc/gdm3/custom.conf
-  fi
-  XORG_CHANGED=1
-fi
+printf '[installer] Version: %s\n' "${VERSION}"
+printf '[installer] Start: %s\n' "$(date --iso-8601=seconds)"
+printf '[installer] Host: %s\n' "$(hostname)"
+printf '[installer] Log: %s\n' "${LOG_FILE}"
 
-if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
-  log "Adding minimal UFW rules on tailscale0"
-  ufw allow in on tailscale0 to any port 22 proto tcp
-  if [[ ${NO_RUSTDESK} -ne 1 ]]; then
-    ufw allow in on tailscale0 to any port 21118 proto tcp
-  fi
-fi
+TEMP_ROOT="$(mktemp -d)"
+mkdir -p "${TEMP_ROOT}/scripts/linux" "${TEMP_ROOT}/state"
 
-log "Deployment summary"
-printf 'SSH:       %s\n' "$(systemctl is-active ssh 2>/dev/null || true)"
-printf 'Tailscale: %s\n' "$(systemctl is-active tailscaled 2>/dev/null || true)"
-printf 'Tailnet IP: %s\n' "$(tailscale ip -4 2>/dev/null || echo 'login not completed')"
-if [[ ${NO_RUSTDESK} -ne 1 ]]; then
-  if dpkg-query -W -f='${Version}' rustdesk >/dev/null 2>&1; then
-    printf 'RustDesk:   %s\n' "$(dpkg-query -W -f='${Version}' rustdesk)"
-  else
-    printf 'RustDesk:   not installed\n'
-  fi
-fi
+for module in \
+  linux/common.sh \
+  linux/01-base.sh \
+  linux/02-ssh.sh \
+  linux/03-tailscale.sh \
+  linux/04-rustdesk.sh \
+  linux/05-system.sh \
+  linux/06-login-summary.sh \
+  linux/07-verify.sh; do
+  get_module "${module}" >/dev/null
+done
 
-cat <<'NEXT'
+CONTEXT_FILE="${TEMP_ROOT}/context.env"
+{
+  printf 'INSTALL_PROXY=%q\n' "${INSTALL_PROXY}"
+  printf 'RUSTDESK_DEB=%q\n' "${RUSTDESK_DEB}"
+  printf 'NO_RUSTDESK=%q\n' "${NO_RUSTDESK}"
+  printf 'KEEP_WAYLAND=%q\n' "${KEEP_WAYLAND}"
+  printf 'KEEP_SLEEP=%q\n' "${KEEP_SLEEP}"
+  printf 'SKIP_TAILSCALE_LOGIN=%q\n' "${SKIP_TAILSCALE_LOGIN}"
+  printf 'LOG_FILE=%q\n' "${LOG_FILE}"
+  printf 'STATE_DIR=%q\n' "${TEMP_ROOT}/state"
+  printf 'APT_PROXY_FILE=%q\n' "${APT_PROXY_FILE}"
+  printf 'ORIGINAL_USER=%q\n' "${SUDO_USER:-root}"
+} > "${CONTEXT_FILE}"
+chmod 600 "${CONTEXT_FILE}"
 
-Manual steps still required:
-1. If Tailscale is not logged in, run: sudo tailscale up
-2. Open RustDesk as the desktop user.
-3. Set a permanent password.
-4. Enable Direct IP access and keep port 21118.
-5. Connect from the other device using:
-     ssh USER@TAILSCALE_IP
-     RustDesk: TAILSCALE_IP:21118
-NEXT
+export INSTALL_CONTEXT_FILE="${CONTEXT_FILE}"
 
-if [[ ${XORG_CHANGED} -eq 1 ]]; then
-  warn "Reboot once to activate Xorg: sudo reboot"
-fi
+run_step() {
+  local number="$1"
+  local name="$2"
+  local script="$3"
+  printf '\n[installer] Step %s: %s\n' "${number}" "${name}"
+  bash "${script}"
+  printf '[installer] Step %s completed\n' "${number}"
+}
+
+run_step 1 "System check, source cleanup and base packages" "${TEMP_ROOT}/scripts/linux/01-base.sh"
+run_step 2 "OpenSSH Server" "${TEMP_ROOT}/scripts/linux/02-ssh.sh"
+run_step 3 "Tailscale repository installation, then Snap fallback" "${TEMP_ROOT}/scripts/linux/03-tailscale.sh"
+run_step 4 "RustDesk" "${TEMP_ROOT}/scripts/linux/04-rustdesk.sh"
+run_step 5 "Autostart, sleep, Xorg and firewall" "${TEMP_ROOT}/scripts/linux/05-system.sh"
+run_step 6 "Tailscale login and connection summary" "${TEMP_ROOT}/scripts/linux/06-login-summary.sh"
+run_step 7 "Final verification" "${TEMP_ROOT}/scripts/linux/07-verify.sh"
+
+INSTALL_FINISHED=1
+printf '\n[installer] All steps completed.\n'
