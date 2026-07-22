@@ -43,8 +43,10 @@ curl_args() {
     --silent \
     --show-error \
     --location \
-    --retry 3 \
-    --connect-timeout 10
+    --retry 1 \
+    --retry-delay 1 \
+    --connect-timeout 6 \
+    --max-time 25
 }
 
 proxy_probe() {
@@ -92,7 +94,6 @@ detect_proxy() {
     fi
   done
 
-  # Useful for Multipass or another VM only when the host proxy permits LAN access.
   gateway="$(ip route 2>/dev/null | awk '/default/ {print $3; exit}')"
   if [[ -n "${gateway}" && "${gateway}" != "127.0.0.1" ]]; then
     for candidate in 10808 10809 7890 7897; do
@@ -114,17 +115,17 @@ curl_fetch() {
   local -a base
   mapfile -t base < <(curl_args)
 
-  if curl "${base[@]}" "${url}" -o "${dest}"; then
-    return 0
-  fi
-
   if [[ -n "${INSTALL_PROXY}" ]]; then
-    warn "Direct download failed; retrying through ${INSTALL_PROXY}"
-    curl "${base[@]}" --proxy "${INSTALL_PROXY}" "${url}" -o "${dest}"
-    return
+    log "Downloading through configured proxy: ${INSTALL_PROXY}"
+    if curl "${base[@]}" --proxy "${INSTALL_PROXY}" "${url}" -o "${dest}"; then
+      return 0
+    fi
+    warn "Proxy download failed; trying a direct connection once"
   fi
 
-  return 1
+  env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+    -u ALL_PROXY -u all_proxy \
+    curl "${base[@]}" "${url}" -o "${dest}"
 }
 
 setup_apt_proxy() {
@@ -268,4 +269,69 @@ rustdesk_service_name() {
     fi
   done
   return 1
+}
+
+proxy_endpoint() {
+  local proxy="$1"
+  [[ -n "${proxy}" ]] || return 1
+  python3 - "${proxy}" <<'PY'
+import sys
+from urllib.parse import urlparse
+u = urlparse(sys.argv[1])
+if not u.hostname:
+    raise SystemExit(1)
+port = u.port
+if port is None:
+    port = 443 if u.scheme == "https" else 80
+print(f"{u.hostname}:{port}")
+PY
+}
+
+proxy_port() {
+  local endpoint
+  endpoint="$(proxy_endpoint "$1" 2>/dev/null)" || return 1
+  printf '%s\n' "${endpoint##*:}"
+}
+
+port_is_listening() {
+  local port="$1"
+  command -v ss >/dev/null 2>&1 || return 2
+  ss -lntuH 2>/dev/null | awk -v wanted="${port}" '
+    {
+      local_addr=$5
+      sub(/^.*:/, "", local_addr)
+      gsub(/\]/, "", local_addr)
+      if (local_addr == wanted) found=1
+    }
+    END { exit(found ? 0 : 1) }
+  '
+}
+
+listening_endpoints() {
+  local port="$1"
+  command -v ss >/dev/null 2>&1 || return 1
+  ss -lntuH 2>/dev/null | awk -v wanted="${port}" '
+    {
+      local_addr=$5
+      check=local_addr
+      sub(/^.*:/, "", check)
+      gsub(/\]/, "", check)
+      if (check == wanted) print local_addr
+    }
+  ' | sort -u | paste -sd, -
+}
+
+print_port_status() {
+  local label="$1"
+  local port="$2"
+  local note="${3:-}"
+  local endpoints=""
+
+  if port_is_listening "${port}"; then
+    endpoints="$(listening_endpoints "${port}" 2>/dev/null || true)"
+    printf '  %-18s TCP/UDP %-5s LISTENING  %s\n' "${label}" "${port}" "${endpoints:-detected}"
+  else
+    printf '  %-18s TCP/UDP %-5s not listening%s\n' \
+      "${label}" "${port}" "${note:+  (${note})}"
+  fi
 }

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="0.5.0"
-REPO_RAW_BASE_DEFAULT="https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main"
-REPO_RAW_BASE="${REPO_RAW_BASE:-${REPO_RAW_BASE_DEFAULT}}"
+VERSION="0.6.0"
+REPO_OWNER="RainCatStar-lit"
+REPO_NAME="Ubuntu-tailscale-remote-access"
+REPO_BRANCH="${REPO_BRANCH:-TEST-IN-22.04}"
+REPO_RAW_BASE="${REPO_RAW_BASE:-}"
 
 INSTALL_PROXY="${INSTALL_PROXY:-}"
 RUSTDESK_DEB="${RUSTDESK_DEB:-}"
@@ -20,6 +22,8 @@ Usage:
 
 Options:
   --proxy URL          HTTP/Mixed proxy, for example http://127.0.0.1:10808
+  --branch NAME        GitHub branch used to download modules
+  --repo-base URL      Raw module base URL; overrides --branch
   --rustdesk-deb PATH  Use a local RustDesk .deb on Ubuntu
   --no-rustdesk        Skip RustDesk installation
   --keep-wayland       Keep Wayland on Ubuntu
@@ -34,6 +38,16 @@ while [[ $# -gt 0 ]]; do
     --proxy)
       [[ $# -ge 2 ]] || { echo "--proxy requires a URL" >&2; exit 2; }
       INSTALL_PROXY="$2"
+      shift 2
+      ;;
+    --branch)
+      [[ $# -ge 2 ]] || { echo "--branch requires a name" >&2; exit 2; }
+      REPO_BRANCH="$2"
+      shift 2
+      ;;
+    --repo-base)
+      [[ $# -ge 2 ]] || { echo "--repo-base requires a URL" >&2; exit 2; }
+      REPO_RAW_BASE="${2%/}"
       shift 2
       ;;
     --rustdesk-deb)
@@ -69,6 +83,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -z "${REPO_RAW_BASE}" ]]; then
+  REPO_RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
+fi
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 LOCAL_SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
 TEMP_ROOT=""
@@ -99,32 +117,52 @@ cleanup() {
 }
 trap cleanup EXIT
 
+bootstrap_curl_args() {
+  printf '%s\n' \
+    --fail \
+    --silent \
+    --show-error \
+    --location \
+    --retry 1 \
+    --retry-delay 1 \
+    --connect-timeout 6 \
+    --max-time 25
+}
+
 bootstrap_curl() {
   local url="$1"
   local dest="$2"
   local candidate
-  local -a args=(--fail --silent --show-error --location --retry 3 --connect-timeout 10)
+  local -a args
+  mapfile -t args < <(bootstrap_curl_args)
 
   if [[ -n "${INSTALL_PROXY}" ]]; then
-    curl "${args[@]}" --proxy "${INSTALL_PROXY}" "${url}" -o "${dest}"
-    return
-  fi
-
-  if curl "${args[@]}" "${url}" -o "${dest}"; then
-    return
-  fi
-
-  for candidate in 10808 10809 7890 7897; do
-    if curl "${args[@]}" --max-time 8 --proxy "http://127.0.0.1:${candidate}" \
-      "${url}" -o "${dest}"; then
-      INSTALL_PROXY="http://127.0.0.1:${candidate}"
-      echo "[installer] Detected local proxy: ${INSTALL_PROXY}" >&2
-      return
+    echo "[installer] Downloading through configured proxy: ${INSTALL_PROXY}" >&2
+    if curl "${args[@]}" --proxy "${INSTALL_PROXY}" "${url}" -o "${dest}"; then
+      return 0
     fi
-  done
+    echo "[installer] Configured proxy failed; trying direct download once" >&2
+  fi
 
-  echo "Failed to download: ${url}" >&2
-  echo "Use --proxy http://127.0.0.1:PORT or run from a complete repository copy." >&2
+  if env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+    -u ALL_PROXY -u all_proxy \
+    curl "${args[@]}" "${url}" -o "${dest}"; then
+    return 0
+  fi
+
+  if [[ -z "${INSTALL_PROXY}" ]]; then
+    for candidate in 10808 10809 7890 7897; do
+      if curl "${args[@]}" --proxy "http://127.0.0.1:${candidate}" \
+        "${url}" -o "${dest}"; then
+        INSTALL_PROXY="http://127.0.0.1:${candidate}"
+        echo "[installer] Detected local proxy: ${INSTALL_PROXY}" >&2
+        return 0
+      fi
+    done
+  fi
+
+  echo "[installer] Failed to download: ${url}" >&2
+  echo "[installer] Check the branch, file path and proxy. Current base: ${REPO_RAW_BASE}" >&2
   return 1
 }
 
@@ -139,6 +177,14 @@ get_module() {
   else
     bootstrap_curl "${REPO_RAW_BASE}/scripts/${relative}" "${target}"
   fi
+
+  [[ -s "${target}" ]] || {
+    echo "[installer] Downloaded module is empty: ${relative}" >&2
+    return 1
+  }
+  case "${target}" in
+    *.sh) bash -n "${target}" ;;
+  esac
   chmod +x "${target}" 2>/dev/null || true
   printf '%s\n' "${target}"
 }
@@ -179,6 +225,8 @@ exec > >(tee -a "${LOG_FILE}") 2>&1
 printf '[installer] Version: %s\n' "${VERSION}"
 printf '[installer] Start: %s\n' "$(date --iso-8601=seconds)"
 printf '[installer] Host: %s\n' "$(hostname)"
+printf '[installer] Module base: %s\n' "${REPO_RAW_BASE}"
+printf '[installer] Requested proxy: %s\n' "${INSTALL_PROXY:-automatic/direct}"
 printf '[installer] Log: %s\n' "${LOG_FILE}"
 
 TEMP_ROOT="$(mktemp -d)"
@@ -208,6 +256,7 @@ CONTEXT_FILE="${TEMP_ROOT}/context.env"
   printf 'STATE_DIR=%q\n' "${TEMP_ROOT}/state"
   printf 'APT_PROXY_FILE=%q\n' "${APT_PROXY_FILE}"
   printf 'ORIGINAL_USER=%q\n' "${SUDO_USER:-root}"
+  printf 'REPO_RAW_BASE=%q\n' "${REPO_RAW_BASE}"
 } > "${CONTEXT_FILE}"
 chmod 600 "${CONTEXT_FILE}"
 
@@ -227,7 +276,7 @@ run_step 2 "OpenSSH Server" "${TEMP_ROOT}/scripts/linux/02-ssh.sh"
 run_step 3 "Tailscale repository installation, then Snap fallback" "${TEMP_ROOT}/scripts/linux/03-tailscale.sh"
 run_step 4 "RustDesk" "${TEMP_ROOT}/scripts/linux/04-rustdesk.sh"
 run_step 5 "Autostart, sleep, Xorg and firewall" "${TEMP_ROOT}/scripts/linux/05-system.sh"
-run_step 6 "Tailscale login and connection summary" "${TEMP_ROOT}/scripts/linux/06-login-summary.sh"
+run_step 6 "Tailscale login, IP and port summary" "${TEMP_ROOT}/scripts/linux/06-login-summary.sh"
 run_step 7 "Final verification" "${TEMP_ROOT}/scripts/linux/07-verify.sh"
 
 INSTALL_FINISHED=1

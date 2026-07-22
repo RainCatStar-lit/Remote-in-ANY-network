@@ -24,6 +24,7 @@ apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
   gnupg \
+  iproute2 \
   openssh-server \
   python3
 
