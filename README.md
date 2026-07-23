@@ -1,289 +1,268 @@
-# Remote in ANY Network
+# Ubuntu / Windows 远程访问部署
 
-通过 **Tailscale、RustDesk 和 OpenSSH**，在校园网、受限局域网、不同运营商网络或异地网络之间建立远程桌面与 SSH 连接。
+本项目使用以下组件建立远程访问：
 
-无需公网 IP，也无需在路由器上配置端口转发。设备只要能够访问互联网，并登录到同一个 Tailscale 账户，就可以通过 Tailscale 分配的虚拟地址互相连接。
+- Tailscale：提供稳定的虚拟专网地址 `100.x.x.x`
+- OpenSSH：通过 Tailscale IP 提供标准 SSH 登录
+- RustDesk：通过 Tailscale IP 进行远程桌面直连
 
----
+当前重点测试环境为 **Ubuntu 22.04**。Windows 10/11 安装入口保留。
+脚本不会创建、保存或上传 Tailscale Auth Key、SSH 密码或 RustDesk 无人值守密码。
 
-## 使用的工具
+## 功能
 
-| 工具 | 用途 | 官方网站 |
-|---|---|---|
-| Tailscale | 在不同网络中的设备之间建立加密虚拟网络，并分配可互通的虚拟 IP | https://tailscale.com/download |
-| RustDesk | 远程查看和控制设备桌面 | https://rustdesk.com/ |
-| OpenSSH | SSH 终端、SFTP、VS Code Remote SSH 等远程开发连接 | https://www.openssh.com/ |
+- 自动安装并启用 OpenSSH
+- 优先尝试 Tailscale 官方 APT 仓库
+- APT 仓库不可用时自动切换到 Snap
+- 支持本机 HTTP/Mixed 代理，例如 `http://127.0.0.1:10808`
+- 显式提供代理时优先使用代理，不再先进行多轮直连等待
+- Tailscale 控制面无法直连时，自动给 `tailscaled` 服务设置代理
+- 自动安装 RustDesk并配置开机启动
+- 可选禁用休眠并切换到 Xorg
+- 安装结束后显示 Tailscale IP、SSH命令、RustDesk地址和相关端口状态
+- 全程记录安装日志
 
-Windows OpenSSH 安装说明：
-
-https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse
-
----
-
-## 安装方式
-
-可以选择 **手动安装**，也可以进入对应系统分支使用 **快速安装**。
-
-### 手动安装
-
-分别从上述官方网站安装：
-
-1. Tailscale
-2. RustDesk
-3. OpenSSH Server
-
-手动安装适合以下情况：
-
-- 希望自行选择软件版本；
-- 不希望执行自动化脚本；
-- 当前系统不在快速安装脚本的支持范围内；
-- 需要自行控制代理、防火墙和服务配置。
-
-安装后确认：
-
-- Tailscale 已运行；
-- OpenSSH Server 已运行；
-- RustDesk 已安装，并允许直接 IP 访问；
-- 所有相关服务已设置为开机启动。
-
-### 快速安装
-
-请选择与系统对应的稳定分支，并按照分支内 README 操作：
-
-| 系统 | 稳定分支 |
-|---|---|
-| Ubuntu 22.04 | [STABLE-IN-22.04](https://github.com/RainCatStar-lit/Remote-in-ANY-network/tree/STABLE-IN-22.04) |
-| Windows 10 / 11 64 位 | [STABLE-IN-WINDOWS](https://github.com/RainCatStar-lit/Remote-in-ANY-network/tree/STABLE-IN-WINDOWS) |
-
-开发和测试版本：
-
-| 系统 | 测试分支 |
-|---|---|
-| Ubuntu 22.04 | [TEST-IN-22.04](https://github.com/RainCatStar-lit/Remote-in-ANY-network/tree/TEST-IN-22.04) |
-| Windows 10 / 11 64 位 | [TEST-IN-WINDOWS](https://github.com/RainCatStar-lit/Remote-in-ANY-network/tree/TEST-IN-WINDOWS) |
-
-普通用户优先使用稳定分支。测试分支用于验证新功能、代理处理、安装包更新和兼容性修改。
-
----
-
-# 安装完成后的操作
-
-## 1. 所有设备登录同一个 Tailscale 账户
-
-在所有需要互相连接的设备上登录同一个 Tailscale 账户。
-
-例如：
+## 仓库结构
 
 ```text
-Ubuntu 工作站   ─┐
-Windows 笔记本   ├─ 同一个 Tailscale 账户
-其他远程设备     ─┘
+install.sh
+reset-ubuntu.sh
+scripts/
+  linux/
+    common.sh
+    01-base.sh
+    02-ssh.sh
+    03-tailscale.sh
+    04-rustdesk.sh
+    05-system.sh
+    06-login-summary.sh
+    07-verify.sh
+  windows/
+    install.ps1
+tests/
+  check.sh
 ```
 
-Tailscale 登录入口：
+## Ubuntu 22.04 快速安装
 
-https://login.tailscale.com
-
----
-
-## 2. 在管理页面确认设备
-
-打开 Tailscale 设备管理页面：
-
-https://login.tailscale.com/admin/machines
-
-确认所有设备已经出现，并处于在线状态。
-
-每台设备会获得一个虚拟 IP，通常类似：
+当前测试分支：
 
 ```text
-100.x.x.x
+TEST-IN-22.04
 ```
 
-这个地址由 Tailscale 自动分配，不需要手动修改系统网卡。
-
-建议给设备设置容易识别的名称，例如：
-
-```text
-rcstation
-windows-laptop
-ubuntu-px4
-lab-workstation
-```
-
----
-
-## 3. 查看 Tailscale IP
-
-### Ubuntu
-
-APT 版本：
+下载入口脚本：
 
 ```bash
-tailscale ip -4
+BRANCH="TEST-IN-22.04"
+BASE_URL="https://raw.githubusercontent.com/RainCatStar-lit/Remote-in-ANY-network/${BRANCH}"
+
+curl -x http://127.0.0.1:10808 \
+  -fsSL "${BASE_URL}/install.sh" \
+  -o /tmp/install.sh
+
+bash -n /tmp/install.sh
 ```
 
-Snap 版本：
+完整安装：
 
 ```bash
-sudo /snap/bin/tailscale ip -4
+sudo bash /tmp/install.sh \
+  --branch TEST-IN-22.04 \
+  --proxy http://127.0.0.1:10808
 ```
 
-兼容写法：
+仅测试 SSH 和 Tailscale：
 
 ```bash
-tailscale ip -4 2>/dev/null \
-  || sudo /snap/bin/tailscale ip -4
+sudo bash /tmp/install.sh \
+  --branch TEST-IN-22.04 \
+  --proxy http://127.0.0.1:10808 \
+  --no-rustdesk \
+  --keep-wayland \
+  --keep-sleep
 ```
 
-### Windows PowerShell
+本地完整仓库中运行时，模块会优先从本地 `scripts/` 读取，不依赖 Raw GitHub。
 
-```powershell
-& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-```
-
-查看完整状态：
-
-```powershell
-& "$env:ProgramFiles\Tailscale\tailscale.exe" status
-```
-
----
-
-## 4. 使用 Tailscale IP 建立 SSH 连接
-
-假设目标设备的 Tailscale IP 为：
+## 安装参数
 
 ```text
-100.80.20.10
+--proxy URL          HTTP/Mixed代理，例如 http://127.0.0.1:10808
+--branch NAME        下载模块所使用的GitHub分支
+--repo-base URL      指定完整Raw模块地址，优先级高于--branch
+--rustdesk-deb PATH  使用本地RustDesk .deb包
+--no-rustdesk        跳过RustDesk
+--keep-wayland       保留Wayland
+--keep-sleep         不修改休眠和挂起设置
+--skip-login         安装Tailscale但暂不登录
 ```
 
-连接 Ubuntu：
-
-```bash
-ssh Ubuntu用户名@100.80.20.10
-```
-
-连接 Windows：
-
-```bash
-ssh Windows用户名@100.80.20.10
-```
-
-例如：
-
-```bash
-ssh rcs@100.80.20.10
-```
-
-目标设备必须已经安装并启动 OpenSSH Server。
-
-VS Code Remote SSH 也可以直接使用相同的 Tailscale IP。
-
----
-
-## 5. 使用 Tailscale IP 建立 RustDesk 连接
-
-在被控设备的 RustDesk 中完成：
+代理 URL 应使用：
 
 ```text
-设置
-→ 安全
-→ 解锁安全设置
-→ 启用直接 IP 访问
-→ 设置永久密码
+http://127.0.0.1:10808
 ```
 
-在控制端 RustDesk 中输入目标设备的 Tailscale IP：
+不要写成：
 
 ```text
-100.80.20.10
+https://127.0.0.1:10808
 ```
 
-部分版本需要显式填写端口：
+## Tailscale登录
+
+安装过程中会在终端显示浏览器授权地址。打开地址并批准当前设备。
+授权地址不会写入安装日志。
+
+登录成功后，安装程序会突出显示：
 
 ```text
-100.80.20.10:21118
+Tailscale IPv4: 100.x.x.x
+SSH command:    ssh 用户名@100.x.x.x
+RustDesk:       100.x.x.x:21118
 ```
 
-应使用目标设备的 Tailscale IP，不要使用校园网、家庭路由器或公网分配的地址。
+手动查看：
 
----
+```bash
+tailscale status 2>/dev/null || sudo /snap/bin/tailscale status
+tailscale ip -4 2>/dev/null || sudo /snap/bin/tailscale ip -4
+ip address show tailscale0
+```
 
-## 常用端口
+Snap版不提供Tailscale SSH。本项目始终使用普通OpenSSH通过Tailscale网络连接。
 
-| 服务 | 默认端口 | 用途 |
+## 端口检查
+
+本项目重点检查以下端口：
+
+| 用途 | 端口 | 说明 |
 |---|---:|---|
-| OpenSSH | 22 | SSH、SFTP、远程开发 |
-| 常见本地代理 | 10808 | v2rayN 等工具的 HTTP / Mixed 代理示例 |
-| RustDesk 直接 IP | 21118 | RustDesk 直接连接 |
+| OpenSSH | TCP 22 | 安装完成后应处于监听状态 |
+| 本机代理 | TCP 10808 | 示例端口，实际取决于v2rayN等代理软件配置 |
+| RustDesk直接IP访问 | TCP 21118 | 需在RustDesk中手动启用“直接IP访问”后检查 |
 
-实际端口以本机软件配置为准。
-
-Ubuntu 检查监听端口：
+查看相关端口：
 
 ```bash
 sudo ss -lntup | grep -E ':(22|10808|21118)\b'
 ```
 
-Windows PowerShell 检查监听端口：
+查看全部监听端口：
 
-```powershell
-Get-NetTCPConnection -State Listen |
-  Where-Object LocalPort -In 22,10808,21118 |
-  Sort-Object LocalPort
+```bash
+sudo ss -lntup
 ```
 
----
+安装程序会自动从 `--proxy` 中解析代理端口。例如传入
+`http://127.0.0.1:10808` 时，结果摘要会检查 `10808` 是否正在监听。
 
-## 安全建议
+## RustDesk设置
 
-- 只使用 Tailscale IP 或 Tailscale 设备名连接；
-- 不要在路由器上把 SSH 22 或 RustDesk 21118 直接映射到公网；
-- 为 RustDesk 设置强永久密码；
-- 定期检查 Tailscale 管理页面中的设备列表；
-- 不再使用的设备应及时从 Tailnet 中移除；
-- 不要把 Tailscale Auth Key、GitHub Token 或远程控制密码写入仓库；
-- Windows 防火墙规则建议仅允许 `100.64.0.0/10` 地址段访问远程服务。
+安装程序只负责安装和自启动。桌面用户仍需手动完成：
 
----
+1. 打开RustDesk。
+2. 进入“设置 → 安全”。
+3. 启用“直接IP访问”。
+4. 自行设置无人值守密码。
 
-## 分支结构
+连接地址：
 
 ```text
-guide
-├─ 项目用途
-├─ 工具官网
-├─ 手动安装
-├─ 稳定分支入口
-└─ 安装完成后的连接指引
-
-STABLE-IN-22.04
-└─ Ubuntu 22.04 稳定快速安装
-
-STABLE-IN-WINDOWS
-└─ Windows 10 / 11 稳定快速安装
-
-TEST-IN-22.04
-└─ Ubuntu 新功能和兼容性测试
-
-TEST-IN-WINDOWS
-└─ Windows 新功能和安装包测试
+100.x.x.x:21118
 ```
 
-稳定分支只保留运行所需的安装器、脚本、安装包校验信息和简短使用说明。通用工具介绍、手动安装和连接说明统一放在 `guide` 分支。
+## 日志
 
----
+Ubuntu：
 
-## 支持范围
+```text
+/var/log/ubuntu-tailscale-remote-access/install-YYYYMMDD-HHMMSS.log
+```
 
-当前重点支持：
+查看最新日志：
 
-- Ubuntu 22.04
-- Windows 10 / Windows 11 64 位
-- Tailscale 跨网络连接
-- OpenSSH 远程终端
-- RustDesk 直接 IP 连接
-- 本机 HTTP / Mixed 代理场景
+```bash
+LOG="$(sudo sh -c 'ls -1t /var/log/ubuntu-tailscale-remote-access/install-*.log | head -n 1')"
+echo "$LOG"
+sudo tail -n 150 "$LOG"
+```
 
-其他系统建议使用手动安装方式。
+查看服务日志：
+
+```bash
+sudo journalctl -u tailscaled.service -n 100 --no-pager
+sudo journalctl -u snap.tailscale.tailscaled.service -n 100 --no-pager
+```
+
+## 清理测试环境
+
+不要通过即将被删除的Tailscale或RustDesk连接执行清理。
+
+仅清理Tailscale及脚本状态：
+
+```bash
+sudo bash reset-ubuntu.sh
+```
+
+同时清理RustDesk和系统设置：
+
+```bash
+sudo bash reset-ubuntu.sh --full
+```
+
+同时删除安装日志：
+
+```bash
+sudo bash reset-ubuntu.sh --full --purge-logs
+```
+
+OpenSSH会被保留。
+
+## 静态检查
+
+```bash
+bash tests/check.sh
+```
+
+预期：
+
+```text
+Static checks passed
+```
+
+## 在Linux端提交到GitHub测试分支
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git unzip
+
+cd ~
+git clone --branch TEST-IN-22.04 \
+  https://github.com/RainCatStar-lit/Remote-in-ANY-network.git
+cd Ubuntu-tailscale-remote-access
+```
+
+把新版文件覆盖到仓库后：
+
+```bash
+git config core.autocrlf false
+bash tests/check.sh
+
+git add --all
+git status --short
+git commit -m "Improve proxy fallback, IP summary and port checks"
+git push origin TEST-IN-22.04
+```
+
+GitHub要求认证时，使用已配置的SSH密钥或Personal Access Token。不要把令牌写入脚本或提交到仓库。
+
+## 合并到main前
+
+测试通过后，可以把测试分支合并到main。合并后建议把 `install.sh` 中默认分支由
+`TEST-IN-22.04` 改为 `main`，或者运行时显式使用：
+
+```bash
+sudo bash install.sh --branch main
+```
