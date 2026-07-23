@@ -29,13 +29,17 @@ install-windows.cmd
 
 安装过程中，PowerShell 会显示一个 Tailscale 登录链接，例如：
 
+```text
 https://login.tailscale.com/a/1a12345678900
+```
 
 在浏览器中打开该链接，并登录与其他设备相同的 Tailscale 账户。
 
 登录完成后，当前 Windows 设备会加入同一个 Tailscale 网络，并获得一个类似下面的虚拟 IP：
 
+```text
 100.x.x.x
+```
 
 后续 SSH 和 RustDesk 连接都使用该 Tailscale IP。
 
