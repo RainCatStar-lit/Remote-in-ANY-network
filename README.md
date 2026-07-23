@@ -1,144 +1,333 @@
-# Ubuntu Tailscale Remote Access
+# Remote in ANY Network
 
-使用 Tailscale、OpenSSH 和 RustDesk，在不同网络之间连接 Ubuntu 22.04 或 Windows 10/11 工作站。
+使用 **Tailscale、RustDesk 和 OpenSSH**，在校园网、受限局域网、异地网络或不同运营商网络之间建立远程桌面与 SSH 连接。
 
-`main` 分支只保留快速入口和说明。QuickInstaller 检测当前系统，然后从对应测试分支下载所需脚本和安装包，不需要下载整个分支 ZIP。
+无需公网 IP，无需在路由器上配置端口转发。设备只要能够访问互联网并登录到同一个 Tailscale 账户，就可以通过 Tailscale 分配的虚拟 IP 互相连接。
 
-## 支持的系统
+---
 
-| 当前系统 | 自动选择的分支 | 安装内容 |
+## 项目用途
+
+本项目用于解决以下场景：
+
+- Windows 笔记本远程控制 Ubuntu 工作站桌面；
+- 在外部网络中通过 SSH 连接实验室、宿舍或办公室设备；
+- 在校园网、公司网络等受限环境中建立设备间连接；
+- 避免直接向公网暴露 SSH、RustDesk 或其他远程服务端口；
+- 为 Ubuntu 22.04 和 Windows 10/11 提供可复用的快速安装流程。
+
+项目结构：
+
+```text
+Tailscale：建立跨网络虚拟局域网
+RustDesk：远程桌面
+OpenSSH：远程终端、文件传输和开发连接
+```
+
+---
+
+## 使用的工具
+
+| 工具 | 用途 | 官方网站 |
 |---|---|---|
-| Ubuntu 22.04 x64 | `TEST-IN-22.04` | OpenSSH、Tailscale、RustDesk、开机启动和连接摘要 |
-| Windows 10/11 x64 | `TEST-IN-WINDOWS` | Win32-OpenSSH、Tailscale、RustDesk、防火墙和连接摘要 |
+| **Tailscale** | 为不同网络中的设备建立加密虚拟网络，并分配可互通的虚拟 IP | [tailscale.com/download](https://tailscale.com/download) |
+| **RustDesk** | 远程查看和控制设备桌面 | [rustdesk.com](https://rustdesk.com/) |
+| **OpenSSH** | SSH 终端、SFTP、VS Code Remote SSH 等远程开发连接 | [openssh.com](https://www.openssh.com/) |
 
-其他系统会停止，不会继续修改系统。
+Windows OpenSSH 说明：
+[Microsoft OpenSSH 文档](https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse)
+
+---
+
+## 安装方式
+
+可以选择 **手动安装**，也可以进入对应系统分支使用 **快速安装**。
+
+### 方式一：手动安装
+
+分别从上述官方网站安装：
+
+1. Tailscale
+2. RustDesk
+3. OpenSSH Server
+
+适合以下情况：
+
+- 希望自行选择软件版本；
+- 不希望执行自动化脚本；
+- 当前系统不在自动安装脚本的测试范围内；
+- 需要手动控制防火墙、代理或服务配置。
+
+### 方式二：快速安装
+
+| 系统 | 使用分支 | 说明 |
+|---|---|---|
+| **Ubuntu 22.04** | [`TEST-IN-22.04`](https://github.com/RainCatStar-lit/Remote-in-ANY-network/tree/TEST-IN-22.04) | 自动安装并配置 Tailscale、OpenSSH 和 RustDesk |
+| **Windows 10 / 11 64 位** | [`TEST-IN-WINDOWS`](https://github.com/RainCatStar-lit/Remote-in-ANY-network/tree/TEST-IN-WINDOWS) | 提供快速安装器、本地安装入口及 Windows 安装包 |
+| **其他系统** | 手动安装 | 按各工具官方文档安装 |
+
+`main` 分支用于项目总览、统一说明和分支入口。
+
+---
 
 ## Ubuntu 22.04 快速安装
 
-下载小型入口脚本：
+克隆 Ubuntu 分支：
 
 ```bash
-curl -fsSL \
-  https://raw.githubusercontent.com/RainCatStar-lit/Remote-in-ANY-network/main/QuickInstaller.sh \
-  -o /tmp/QuickInstaller.sh
+git clone --branch TEST-IN-22.04 \
+  https://github.com/RainCatStar-lit/Remote-in-ANY-network.git
+
+cd Remote-in-ANY-network
+sudo bash install.sh
 ```
 
-校园网需要本机代理时：
+使用本机 HTTP 或 Mixed 代理时，例如代理端口为 `10808`：
 
 ```bash
-sudo bash /tmp/QuickInstaller.sh \
+sudo bash install.sh \
   --proxy http://127.0.0.1:10808
 ```
 
-可以直连 GitHub 时：
+仅测试 Tailscale 和 SSH，不安装 RustDesk、不修改休眠和 Wayland：
 
 ```bash
-sudo bash /tmp/QuickInstaller.sh
+sudo bash install.sh \
+  --proxy http://127.0.0.1:10808 \
+  --no-rustdesk \
+  --keep-wayland \
+  --keep-sleep
 ```
 
-QuickInstaller 只先下载 `TEST-IN-22.04/install.sh`。该安装器再按步骤获取 Linux 模块，不会克隆整个仓库。
+安装程序会优先尝试 Tailscale 官方软件源；官方软件源不可用时自动回退到 Snap。
 
-常用参数：
+安装完成后会显示：
 
 ```text
---no-rustdesk     不安装 RustDesk
---keep-wayland    保留 Wayland
---keep-sleep      保留休眠设置
---skip-login      暂不登录 Tailscale
+Tailscale IPv4
+SSH 连接命令
+RustDesk 直接 IP 地址
+SSH、代理和 RustDesk 相关端口状态
+安装日志位置
 ```
 
-## Windows 10/11 快速安装
+---
 
-从 `main` 分支只下载：
+## Windows 10 / 11 快速安装
+
+进入 Windows 分支：
+
+[打开 `TEST-IN-WINDOWS`](https://github.com/RainCatStar-lit/Remote-in-ANY-network/tree/TEST-IN-WINDOWS)
+
+### 快速安装器
+
+下载以下两个文件，并放在同一目录：
 
 ```text
-QuickInstaller.cmd
+quick-install.cmd
+quick-install.ps1
 ```
 
-双击运行并接受管理员权限提示。脚本会：
+双击：
 
-1. 检测 64 位 Windows 10/11。
-2. 自动选择 `TEST-IN-WINDOWS`。
-3. 下载分支安装器和 SHA-256 清单。
-4. 仅下载当前缺少的软件包；已缓存且哈希正确的 MSI 不会重复下载。
-5. 安装软件并执行：
-
-```powershell
-& "C:\Program Files\Tailscale\tailscale.exe" login
+```text
+quick-install.cmd
 ```
 
-浏览器打开后，登录与另一台设备相同的 Tailscale 账户。
+快速安装器会下载 `TEST-IN-WINDOWS` 分支内容，并启动管理员安装程序。
 
-PowerShell 也可以直接运行：
+### 完整本地安装
 
-```powershell
-$Url = "https://raw.githubusercontent.com/RainCatStar-lit/Remote-in-ANY-network/main/QuickInstaller.ps1"
-$File = "$env:TEMP\RCS-QuickInstaller.ps1"
-Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $File
-PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File $File
+也可以下载整个 Windows 分支 ZIP，解压后双击：
+
+```text
+install-windows.cmd
 ```
 
-使用本机代理：
+该方式直接使用分支中提供的安装文件，不依赖 Windows Update 安装 OpenSSH。
 
-```powershell
-PowerShell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File $File `
-  -Proxy "http://127.0.0.1:10808"
+安装完成后，Tailscale 会给出登录入口。按照浏览器提示登录即可。
+
+---
+
+# 安装完成后的操作
+
+## 1. 所有设备登录同一个 Tailscale 账户
+
+在所有需要互相连接的设备上登录 **同一个 Tailscale 账户**。
+
+例如：
+
+```text
+Ubuntu 工作站   ─┐
+Windows 笔记本   ├─ 登录同一个 Tailscale 账户
+其他远程设备     ─┘
 ```
 
-## 登录后查看 Tailscale IP
+Tailscale 登录入口：
+[login.tailscale.com](https://login.tailscale.com/)
 
-Ubuntu：
+---
+
+## 2. 在管理页面确认设备
+
+打开 Tailscale 管理页面：
+
+[login.tailscale.com/admin/machines](https://login.tailscale.com/admin/machines)
+
+确认所有设备已经出现，并处于在线状态。
+
+每台设备会获得一个虚拟 IP，通常类似：
+
+```text
+100.x.x.x
+```
+
+这个地址由 Tailscale 自动分配，不需要手动修改系统网卡。
+
+建议为设备设置容易识别的名称，例如：
+
+```text
+rcstation
+windows-laptop
+ubuntu-px4
+lab-workstation
+```
+
+---
+
+## 3. 查看设备的 Tailscale IP
+
+### Ubuntu
+
+APT 版本：
 
 ```bash
-tailscale ip -4 2>/dev/null || sudo /snap/bin/tailscale ip -4
+tailscale ip -4
 ```
 
-Windows：
+Snap 版本：
+
+```bash
+sudo /snap/bin/tailscale ip -4
+```
+
+兼容写法：
+
+```bash
+tailscale ip -4 2>/dev/null \
+  || sudo /snap/bin/tailscale ip -4
+```
+
+### Windows PowerShell
 
 ```powershell
-& "C:\Program Files\Tailscale\tailscale.exe" ip -4
+& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
 ```
 
-输出类似：
+查看完整设备状态：
+
+```powershell
+& "$env:ProgramFiles\Tailscale\tailscale.exe" status
+```
+
+---
+
+## 4. 使用 Tailscale IP 建立 SSH 连接
+
+假设目标设备的 Tailscale IP 为：
 
 ```text
-100.82.36.17
+100.80.20.10
 ```
 
-该地址由 Tailscale 自动分配，不需要手动修改网卡 IP。
+连接 Ubuntu：
 
-## 连接方式
+```bash
+ssh Ubuntu用户名@100.80.20.10
+```
 
-SSH：
+连接 Windows：
+
+```bash
+ssh Windows用户名@100.80.20.10
+```
+
+例如：
+
+```bash
+ssh rcs@100.80.20.10
+```
+
+目标设备必须已经安装并启动 OpenSSH Server。
+
+VS Code Remote SSH 也可以直接使用同一个地址。
+
+---
+
+## 5. 使用 Tailscale IP 建立 RustDesk 连接
+
+在被控设备的 RustDesk 中完成：
 
 ```text
-ssh 用户名@100.x.x.x
+设置
+→ 安全
+→ 解锁安全设置
+→ 启用直接 IP 访问
+→ 设置永久密码
 ```
 
-RustDesk 直接 IP：
+在控制端 RustDesk 中输入目标设备的 Tailscale IP：
 
 ```text
-100.x.x.x:21118
+100.80.20.10
 ```
 
-RustDesk 安装完成后仍需打开一次：
+部分 RustDesk 版本需要显式填写端口：
 
 ```text
-设置 → 安全 → 解锁安全设置
-启用直接 IP 访问
-设置永久密码
+100.80.20.10:21118
 ```
 
-## 查看端口
+RustDesk 连接使用的是目标设备的 **Tailscale IP**，不是校园网、家庭路由器或公网分配的地址。
 
-Ubuntu：
+---
+
+## 连接结构
+
+```text
+Windows 笔记本 ─┐
+Ubuntu 工作站  ─┼─ Tailscale 虚拟网络 ─ SSH / RustDesk
+其他设备       ─┘
+```
+
+设备可以位于：
+
+- 同一局域网；
+- 不同局域网；
+- 校园网或受限网络；
+- 家庭网络与实验室网络；
+- 不同城市或不同运营商网络。
+
+---
+
+## 常用端口
+
+| 服务 | 默认端口 | 用途 |
+|---|---:|---|
+| OpenSSH | `22` | SSH、SFTP、远程开发 |
+| 常见本地代理 | `10808` | v2rayN 等工具的 HTTP / Mixed 代理示例 |
+| RustDesk 直接 IP | `21118` | RustDesk 直接连接 |
+
+实际端口以本机软件配置为准。
+
+检查 Ubuntu 监听端口：
 
 ```bash
 sudo ss -lntup | grep -E ':(22|10808|21118)\b'
 ```
 
-Windows 管理员 PowerShell：
+检查 Windows 监听端口：
 
 ```powershell
 Get-NetTCPConnection -State Listen |
@@ -146,50 +335,52 @@ Get-NetTCPConnection -State Listen |
   Sort-Object LocalPort
 ```
 
-端口用途：
+---
 
-```text
-22       OpenSSH
-10808    常见本机 HTTP/Mixed 代理端口
-21118    RustDesk 直接 IP
-```
+## 安全建议
 
-## 日志
+- 只使用 Tailscale IP 或 Tailscale 设备名连接；
+- 不要在路由器上把 SSH `22` 或 RustDesk `21118` 直接映射到公网；
+- 为 RustDesk 设置强永久密码；
+- 定期检查 Tailscale 管理页面中的设备列表；
+- 不再使用的设备应及时从 Tailnet 中移除；
+- 不要把 Tailscale Auth Key、GitHub Token 或远程控制密码写入仓库；
+- Windows 防火墙规则建议仅允许 `100.64.0.0/10` 地址段访问远程服务。
 
-Ubuntu：
+---
 
-```text
-/var/log/ubuntu-tailscale-remote-access/
-```
-
-Windows：
-
-```text
-C:\ProgramData\Ubuntu-tailscale-remote-access\logs\
-```
-
-Windows 下载缓存：
-
-```text
-C:\ProgramData\Ubuntu-tailscale-remote-access\quick-installer\
-```
-
-## 分支结构
+## 分支说明
 
 ```text
 main
-  QuickInstaller.sh
-  QuickInstaller.cmd
-  QuickInstaller.ps1
-  README.md
-
-TEST-IN-22.04
-  Ubuntu 22.04 完整安装器和 Linux 模块
-
-TEST-IN-WINDOWS
-  Windows 完整安装器、MSI 和 SHA-256 清单
+├─ 项目总览与统一使用说明
+│
+├─ TEST-IN-22.04
+│  └─ Ubuntu 22.04 快速安装、代理处理和安装日志
+│
+└─ TEST-IN-WINDOWS
+   └─ Windows 10 / 11 快速安装器与本地安装包
 ```
 
-## 安全说明
+---
 
-防火墙规则只允许 Tailscale 地址段 `100.64.0.0/10` 访问 SSH 和 RustDesk 直接连接端口。不要在路由器上转发 TCP 22 或 TCP 21118，也不要把 RustDesk 永久密码写入脚本或仓库。
+## 当前测试范围
+
+已重点测试：
+
+- Ubuntu 22.04
+- Windows 10 / Windows 11 64 位
+- Tailscale 跨网络连接
+- OpenSSH 远程终端
+- RustDesk 直接 IP 连接
+- 本机 HTTP / Mixed 代理场景
+
+其他 Linux 发行版暂不保证自动安装脚本可用，建议使用手动安装方式。
+
+---
+
+## 仓库地址
+
+```text
+https://github.com/RainCatStar-lit/Remote-in-ANY-network
+```
