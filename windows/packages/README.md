@@ -17,4 +17,4 @@ OpenSSH-Win64-v9.8.3.0.msi
 SHA256SUMS.txt
 ```
 
-这些二进制文件应在创建 `TEST-IN-WINDOWS` 分支时提交到仓库。单个文件必须低于 GitHub 的普通 Git 文件大小限制。
+这些二进制文件应在创建 `STABLE-IN-WINDOWS` 分支时提交到仓库。单个文件必须低于 GitHub 的普通 Git 文件大小限制。
