@@ -4,7 +4,7 @@ set -Eeuo pipefail
 VERSION="0.6.0"
 REPO_OWNER="RainCatStar-lit"
 REPO_NAME="Ubuntu-tailscale-remote-access"
-REPO_BRANCH="${REPO_BRANCH:-TEST-IN-22.04}"
+REPO_BRANCH="${REPO_BRANCH:-STABLE-IN-22.04}"
 REPO_RAW_BASE="${REPO_RAW_BASE:-}"
 
 INSTALL_PROXY="${INSTALL_PROXY:-}"
