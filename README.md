@@ -1,55 +1,51 @@
-# Ubuntu 22.04 Stable Installer
+# Ubuntu 22.04 稳定版安装器
 
-分支：`STABLE-IN-22.04`
+该分支用于在 Ubuntu 22.04 64 位系统上快速安装并配置：
 
-该分支用于在 Ubuntu 22.04 上快速安装并配置 OpenSSH、Tailscale 和 RustDesk。
+- OpenSSH Server
+- Tailscale
+- RustDesk
 
-## 安装
+## 快速安装
 
-克隆稳定分支：
+打开终端，执行：
 
 ```bash
-git clone --branch STABLE-IN-22.04 \
-  https://github.com/RainCatStar-lit/Remote-in-ANY-network.git
+git clone   --branch STABLE-IN-22.04   --single-branch   https://github.com/RainCatStar-lit/Remote-in-ANY-network.git
 
 cd Remote-in-ANY-network
-```
 
-直接安装：
-
-```bash
 sudo bash install.sh
 ```
 
-使用本机 HTTP / Mixed 代理，例如端口为 `10808`：
+如果当前网络需要使用本机代理，例如 127.0.0.1:10808，则再执行：
 
 ```bash
-sudo bash install.sh \
-  --proxy http://127.0.0.1:10808
+sudo bash install.sh   --proxy http://127.0.0.1:10808
 ```
 
-安装程序会：
+安装器会自动处理软件安装、服务启动、Tailscale 安装方式回退、RustDesk 配置和连接信息输出。
 
-- 安装并启用 OpenSSH；
-- 优先通过官方仓库安装 Tailscale，失败时回退到 Snap；
-- 安装 RustDesk；
-- 设置相关服务开机启动；
-- 显示 Tailscale IP、SSH 命令和相关端口；
-- 将安装日志写入 `/var/log/ubuntu-tailscale-remote-access/`。
+## 登录 Tailscale
 
-## 安装完成后
+安装过程中，终端会显示 Tailscale 登录链接，例如：
 
-根据浏览器提示登录 Tailscale，并确保其他设备使用同一个 Tailscale 账户。
-
-查看地址：
-
-```bash
-tailscale ip -4 2>/dev/null \
-  || sudo /snap/bin/tailscale ip -4
+```text
+https://login.tailscale.com/a/1a12345678900
 ```
 
-RustDesk 还需要在图形界面中启用直接 IP 访问并设置永久密码。
+在浏览器中打开该链接，并登录与其他设备相同的 Tailscale 账户。
 
-完整连接说明：
+登录完成后，终端会显示当前设备的 Tailscale IP，例如：
+
+```text
+100.x.x.x
+```
+
+后续 SSH 和 RustDesk 连接都使用该 Tailscale IP。
+
+## 下一步
+
+完成安装后，返回项目引导页查看设备连接方法：
 
 https://github.com/RainCatStar-lit/Remote-in-ANY-network/tree/guide
