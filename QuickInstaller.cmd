@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-set "SCRIPT_URL=https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/QuickInstaller.ps1"
+set "SCRIPT_URL=https://raw.githubusercontent.com/RainCatStar-lit/Remote-in-ANY-network/main/QuickInstaller.ps1"
 set "SCRIPT_FILE=%TEMP%\RCS-QuickInstaller.ps1"
 title RCS Remote Access QuickInstaller
 

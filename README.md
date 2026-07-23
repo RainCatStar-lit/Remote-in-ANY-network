@@ -19,7 +19,7 @@
 
 ```bash
 curl -fsSL \
-  https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/QuickInstaller.sh \
+  https://raw.githubusercontent.com/RainCatStar-lit/Remote-in-ANY-network/main/QuickInstaller.sh \
   -o /tmp/QuickInstaller.sh
 ```
 
@@ -72,7 +72,7 @@ QuickInstaller.cmd
 PowerShell 也可以直接运行：
 
 ```powershell
-$Url = "https://raw.githubusercontent.com/RainCatStar-lit/Ubuntu-tailscale-remote-access/main/QuickInstaller.ps1"
+$Url = "https://raw.githubusercontent.com/RainCatStar-lit/Remote-in-ANY-network/main/QuickInstaller.ps1"
 $File = "$env:TEMP\RCS-QuickInstaller.ps1"
 Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $File
 PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File $File
